@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owner App - Firebase</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        :root { --bg:#f4f6f8; --card:#fff; --black:#000; --red:#d32f2f; --green:#2e7d32; }
+        body { margin:0; font-family:'Segoe UI',sans-serif; background:var(--bg); display:flex; justify-content:center; }
+        #app { width:100%; max-width:480px; height:100vh; background:var(--bg); display:flex; flex-direction:column; padding:20px; overflow-y:auto; }
+        .card { background:var(--card); padding:20px; border-radius:20px; margin-bottom:15px; box-shadow:0 5px 15px rgba(0,0,0,0.05); }
+        .btn { background:var(--black); color:#fff; border:none; padding:15px; border-radius:15px; width:100%; cursor:pointer; font-weight:bold; margin-top:10px; }
+        input { width:100%; padding:15px; border:none; background:#eef; border-radius:15px; margin-bottom:10px; box-sizing:border-box; }
+        .bottom-nav { position:fixed; bottom:0; width:100%; max-width:480px; background:#fff; height:70px; display:flex; justify-content:space-around; align-items:center; border-top:1px solid #ddd; }
+        .nav-item { cursor:pointer; font-size:12px; font-weight:bold; color:#888; }
+        .nav-item.active { color:#000; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- Login -->
+    <div id="view-login">
+        <h2>Owner Login</h2>
+        <button class="btn" onclick="googleLogin()">G Sign in with Google</button>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="view-dash" style="display:none; padding-bottom:80px;">
+        <div class="card" style="background:#000; color:#fff;">
+            <p>Total Receivables</p>
+            <h1 id="dash-total">Loading...</h1>
+        </div>
+        <div class="card">
+            <h3>Staff List</h3>
+            <div id="staff-list"></div>
+            <button class="btn" onclick="nav('view-add-staff')">+ Add Staff</button>
+        </div>
+    </div>
+
+    <!-- Add Staff -->
+    <div id="view-add-staff" style="display:none;">
+        <h3>Add New Staff</h3>
+        <input id="s-name" placeholder="Name">
+        <input id="s-user" placeholder="Username">
+        <input id="s-pass" placeholder="Password">
+        <button class="btn" onclick="addStaff()">Create</button>
+        <button class="btn" style="background:#fff; color:#000; border:1px solid #000;" onclick="nav('view-dash')">Cancel</button>
+    </div>
+
+    <!-- Settings -->
+    <div id="view-set" style="display:none;">
+        <h3>Settings</h3>
+        <input id="upi-id" placeholder="UPI ID">
+        <button class="btn" onclick="saveSettings()">Save</button>
+        <button class="btn" style="background:red;" onclick="logout()">Logout</button>
+    </div>
+
+    <!-- Nav -->
+    <div id="nav" class="bottom-nav" style="display:none;">
+        <div class="nav-item active" onclick="nav('view-dash')">🏠 Home</div>
+        <div class="nav-item" onclick="nav('view-set')">⚙️ Settings</div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+    import { getAuth, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyB__CUVq3im7j8Xyf__w7sAw0jiWNny-_0",
+        authDomain: "digital-khata-90e19.firebaseapp.com",
+        projectId: "digital-khata-90e19",
+        storageBucket: "digital-khata-90e19.firebasestorage.app",
+        messagingSenderId: "434125600852",
+        appId: "1:434125600852:web:09ed98877cd49c9bae55c1"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    // 1. Check Auth State on Load
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            initApp();
+        } else {
+            document.getElementById('view-login').style.display = 'block';
+        }
+    });
+
+    // 2. Login Function (Redirect Mode)
+    window.googleLogin = () => {
+        signInWithRedirect(auth, provider);
+    };
+
+    // 3. Handle Redirect Result (Optional - AuthStateChanged handles it mostly)
+    getRedirectResult(auth).catch((error) => {
+        console.error("Login Failed:", error);
+        alert("Login Failed: " + error.message);
+    });
+
+    function initApp() {
+        document.getElementById('view-login').style.display = 'none';
+        document.getElementById('view-dash').style.display = 'block';
+        document.getElementById('nav').style.display = 'flex';
+        
+        // Load Staff
+        onSnapshot(collection(db, "staff"), (snap) => {
+            const div = document.getElementById('staff-list');
+            div.innerHTML = '';
+            snap.forEach(d => {
+                const s = d.data();
+                const btn = document.createElement('button');
+                btn.innerHTML = 'Del';
+                btn.style.cssText = "background:red; color:white; border:none; padding:5px; margin-left:10px; border-radius:5px;";
+                btn.onclick = () => deleteStaff(d.id);
+                
+                const p = document.createElement('div');
+                p.innerHTML = `<strong>${s.name}</strong> (${s.user})`;
+                p.appendChild(btn);
+                div.appendChild(p);
+            });
+        });
+
+        // Load Total
+        onSnapshot(collection(db, "transactions"), (snap) => {
+            let t = 0;
+            snap.forEach(d => d.data().type=='GIVE'? t+=parseFloat(d.data().amount) : t-=parseFloat(d.data().amount));
+            document.getElementById('dash-total').innerText = `₹ ${t}`;
+        });
+    }
+
+    window.addStaff = async () => {
+        const n = document.getElementById('s-name').value;
+        const u = document.getElementById('s-user').value;
+        const p = document.getElementById('s-pass').value;
+        if(n && u && p) {
+            await addDoc(collection(db, "staff"), { name:n, user:u, pass:p });
+            alert('Staff Added');
+            nav('view-dash');
+        }
+    };
+
+    window.deleteStaff = async (id) => {
+        if(confirm('Delete Staff?')) await deleteDoc(doc(db, "staff", id));
+    };
+
+    window.saveSettings = async () => {
+        const u = document.getElementById('upi-id').value;
+        await setDoc(doc(db, "settings", "config"), { upi:u }, { merge:true });
+        alert('Saved');
+    };
+
+    window.nav = (id) => {
+        ['view-dash', 'view-add-staff', 'view-set'].forEach(v => document.getElementById(v).style.display='none');
+        document.getElementById(id).style.display = 'block';
+    };
+
+    window.logout = () => { signOut(auth).then(() => location.reload()); };
+</script>
+</body>
+</html>
